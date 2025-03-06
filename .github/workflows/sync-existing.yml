@@ -23,10 +23,6 @@ jobs:
                   id
                   fields(first: 20) {
                     nodes {
-                      ... on ProjectV2FieldCommon {
-                        id
-                        name
-                      }
                       ... on ProjectV2SingleSelectField {
                         id
                         name
@@ -38,7 +34,6 @@ jobs:
                       ... on ProjectV2Field {
                         id
                         name
-                        dataType
                       }
                     }
                   }
@@ -55,11 +50,15 @@ jobs:
           
           # Extract field IDs and options
           FIELDS_JSON=$(echo "$PROJECT_DATA" | jq -r '.data.user.projectV2.fields.nodes')
+          echo "Fields data: $FIELDS_JSON"
           
           # Get Priority field info including options
           PRIORITY_FIELD=$(echo "$FIELDS_JSON" | jq -r '. | map(select(.name=="Priority"))[0]')
           PRIORITY_FIELD_ID=$(echo "$PRIORITY_FIELD" | jq -r '.id')
           echo "PRIORITY_FIELD_ID=$PRIORITY_FIELD_ID" >> $GITHUB_ENV
+          
+          # Store priority options in a file for later use
+          echo "$PRIORITY_FIELD" | jq -r '.options' > priority_options.json
           
           # Get other field IDs
           STATUS_FIELD_ID=$(echo "$FIELDS_JSON" | jq -r '.[] | select(.name=="Status") | .id')
@@ -68,14 +67,10 @@ jobs:
           echo "STATUS_FIELD_ID=$STATUS_FIELD_ID" >> $GITHUB_ENV
           echo "DATE_FIELD_ID=$DATE_FIELD_ID" >> $GITHUB_ENV
           
-          # Get priority options and their IDs
-          PRIORITY_OPTIONS=$(echo "$PRIORITY_FIELD" | jq -r '.options')
-          echo "PRIORITY_OPTIONS=$PRIORITY_OPTIONS" >> $GITHUB_ENV
-          
           echo "Found Priority Field ID: $PRIORITY_FIELD_ID"
           echo "Found Status Field ID: $STATUS_FIELD_ID"
           echo "Found Date Field ID: $DATE_FIELD_ID"
-          echo "Priority Options: $PRIORITY_OPTIONS"
+          echo "Priority field data: $PRIORITY_FIELD"
       
       - name: Sync Existing Issues
         env:
@@ -121,20 +116,17 @@ jobs:
               priority_name="P3 - Normal ⭐"
             fi
             
-            # Get option ID for the priority
-            priority_option_id=$(echo "$PRIORITY_OPTIONS" | jq -r ".[] | select(.name==\"$priority_name\") | .id")
-            
             # Update priority
-            echo "Setting priority to $priority_name (ID: $priority_option_id)..."
+            echo "Setting priority to $priority_name..."
             gh api graphql -f query='
-              mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+              mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: String!) {
                 updateProjectV2ItemFieldValue(
                   input: {
                     projectId: $projectId
                     itemId: $itemId
                     fieldId: $fieldId
                     value: { 
-                      singleSelectOptionId: $optionId
+                      text: $value
                     }
                   }
                 ) {
@@ -142,7 +134,7 @@ jobs:
                     id
                   }
                 }
-              }' -f projectId="$PROJECT_ID" -f itemId="$item_id" -f fieldId="$PRIORITY_FIELD_ID" -f optionId="$priority_option_id"
+              }' -f projectId="$PROJECT_ID" -f itemId="$item_id" -f fieldId="$PRIORITY_FIELD_ID" -f value="$priority_name"
             
             # Set due date (March 7, 2025)
             echo "Setting due date..."
