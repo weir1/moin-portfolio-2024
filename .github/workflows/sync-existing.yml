@@ -14,29 +14,29 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         id: project
         run: |
-          # First, list all projects to get the correct project ID
-          PROJECTS=$(gh api graphql -f query='
+          # Get project info using the project number
+          PROJECT_DATA=$(gh api graphql -f query='
             query {
               viewer {
-                projectsV2(first: 20) {
-                  nodes {
-                    id
-                    title
-                    number
-                    fields(first: 20) {
-                      nodes {
-                        ... on ProjectV2Field {
+                projectV2(number: 3) {
+                  id
+                  fields(first: 20) {
+                    nodes {
+                      ... on ProjectV2Field {
+                        id
+                        name
+                      }
+                      ... on ProjectV2SingleSelectField {
+                        id
+                        name
+                        options {
                           id
                           name
                         }
-                        ... on ProjectV2SingleSelectField {
-                          id
-                          name
-                          options {
-                            id
-                            name
-                          }
-                        }
+                      }
+                      ... on ProjectV2DateField {
+                        id
+                        name
                       }
                     }
                   }
@@ -44,25 +44,26 @@ jobs:
               }
             }')
           
-          # Extract project ID and fields for "Moin Portfolio Website" project
-          PROJECT_DATA=$(echo "$PROJECTS" | jq -r '.data.viewer.projectsV2.nodes[] | select(.title=="Moin Portfolio Website")')
-          PROJECT_ID=$(echo "$PROJECT_DATA" | jq -r '.id')
-          
+          # Extract project ID
+          PROJECT_ID=$(echo "$PROJECT_DATA" | jq -r '.data.viewer.projectV2.id')
           echo "PROJECT_ID=$PROJECT_ID" >> $GITHUB_ENV
+          echo "Found Project ID: $PROJECT_ID"
           
           # Extract field IDs
-          PRIORITY_FIELD_ID=$(echo "$PROJECT_DATA" | jq -r '.fields.nodes[] | select(.name=="Priority") | .id')
-          STATUS_FIELD_ID=$(echo "$PROJECT_DATA" | jq -r '.fields.nodes[] | select(.name=="Status") | .id')
-          DATE_FIELD_ID=$(echo "$PROJECT_DATA" | jq -r '.fields.nodes[] | select(.name=="Due Date") | .id')
+          FIELDS_JSON=$(echo "$PROJECT_DATA" | jq -r '.data.viewer.projectV2.fields.nodes')
+          
+          # Get field IDs
+          PRIORITY_FIELD_ID=$(echo "$FIELDS_JSON" | jq -r '.[] | select(.name=="Priority") | .id')
+          STATUS_FIELD_ID=$(echo "$FIELDS_JSON" | jq -r '.[] | select(.name=="Status") | .id')
+          DATE_FIELD_ID=$(echo "$FIELDS_JSON" | jq -r '.[] | select(.name=="Due Date") | .id')
           
           echo "PRIORITY_FIELD_ID=$PRIORITY_FIELD_ID" >> $GITHUB_ENV
           echo "STATUS_FIELD_ID=$STATUS_FIELD_ID" >> $GITHUB_ENV
           echo "DATE_FIELD_ID=$DATE_FIELD_ID" >> $GITHUB_ENV
           
-          echo "Found Project ID: $PROJECT_ID"
-          echo "Priority Field ID: $PRIORITY_FIELD_ID"
-          echo "Status Field ID: $STATUS_FIELD_ID"
-          echo "Date Field ID: $DATE_FIELD_ID"
+          echo "Found Priority Field ID: $PRIORITY_FIELD_ID"
+          echo "Found Status Field ID: $STATUS_FIELD_ID"
+          echo "Found Date Field ID: $DATE_FIELD_ID"
       
       - name: Sync Existing Issues
         env:
@@ -82,51 +83,67 @@ jobs:
             echo "Processing issue #$issue_number: $title"
             
             # Add to project
-            item_id=$(gh api graphql -f query='
-              mutation($input: AddProjectV2ItemByIdInput!) {
-                addProjectV2ItemById(input: $input) {
+            ADD_RESPONSE=$(gh api graphql -f query='
+              mutation($projectId: ID!, $contentId: ID!) {
+                addProjectV2ItemById(input: {projectId: $projectId contentId: $contentId}) {
                   item {
                     id
                   }
                 }
-              }' -f input="{\"projectId\":\"$PROJECT_ID\",\"contentId\":\"$node_id\"}" --jq '.data.addProjectV2ItemById.item.id')
+              }' -f projectId="$PROJECT_ID" -f contentId="$node_id")
             
+            item_id=$(echo "$ADD_RESPONSE" | jq -r '.data.addProjectV2ItemById.item.id')
             echo "Added to project, got item ID: $item_id"
             
             # Get labels
             labels=$(echo "$issue" | jq -r '.labels[].name // empty')
             
             # Set priority based on labels
-            priority_value="{\"optionId\":\"P3 - Normal ⭐\"}"
             if echo "$labels" | grep -q "p0-critical"; then
-              priority_value="{\"optionId\":\"P0 - Critical 🚨\"}"
+              priority="P0 - Critical 🚨"
             elif echo "$labels" | grep -q "high-priority"; then
-              priority_value="{\"optionId\":\"P1 - High Priority 🔥\"}"
+              priority="P1 - High Priority 🔥"
             elif echo "$labels" | grep -q "feature"; then
-              priority_value="{\"optionId\":\"P2 - Important 📈\"}"
+              priority="P2 - Important 📈"
+            else
+              priority="P3 - Normal ⭐"
             fi
             
             # Update priority
-            echo "Setting priority..."
+            echo "Setting priority to: $priority"
             gh api graphql -f query='
-              mutation($input: UpdateProjectV2ItemFieldValueInput!) {
-                updateProjectV2ItemFieldValue(input: $input) {
+              mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: String!) {
+                updateProjectV2ItemFieldValue(
+                  input: {
+                    projectId: $projectId
+                    itemId: $itemId
+                    fieldId: $fieldId
+                    value: $value
+                  }
+                ) {
                   projectV2Item {
                     id
                   }
                 }
-              }' -f input="{\"projectId\":\"$PROJECT_ID\",\"itemId\":\"$item_id\",\"fieldId\":\"$PRIORITY_FIELD_ID\",\"value\":$priority_value}"
+              }' -f projectId="$PROJECT_ID" -f itemId="$item_id" -f fieldId="$PRIORITY_FIELD_ID" -f value="$priority"
             
             # Set due date (March 7, 2025)
-            echo "Setting due date..."
+            echo "Setting due date to 2025-03-07"
             gh api graphql -f query='
-              mutation($input: UpdateProjectV2ItemFieldValueInput!) {
-                updateProjectV2ItemFieldValue(input: $input) {
+              mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: Date!) {
+                updateProjectV2ItemFieldValue(
+                  input: {
+                    projectId: $projectId
+                    itemId: $itemId
+                    fieldId: $fieldId
+                    value: $value
+                  }
+                ) {
                   projectV2Item {
                     id
                   }
                 }
-              }' -f input="{\"projectId\":\"$PROJECT_ID\",\"itemId\":\"$item_id\",\"fieldId\":\"$DATE_FIELD_ID\",\"value\":\"2025-03-07\"}"
+              }' -f projectId="$PROJECT_ID" -f itemId="$item_id" -f fieldId="$DATE_FIELD_ID" -f value="2025-03-07"
             
-            echo "Processed issue #$issue_number"
+            echo "Completed processing issue #$issue_number"
           done
