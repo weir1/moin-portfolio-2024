@@ -48,29 +48,23 @@ jobs:
           echo "PROJECT_ID=$PROJECT_ID" >> $GITHUB_ENV
           echo "Found Project ID: $PROJECT_ID"
           
-          # Extract field IDs and options
-          FIELDS_JSON=$(echo "$PROJECT_DATA" | jq -r '.data.user.projectV2.fields.nodes')
-          echo "Fields data: $FIELDS_JSON"
-          
           # Get Priority field info including options
-          PRIORITY_FIELD=$(echo "$FIELDS_JSON" | jq -r '. | map(select(.name=="Priority"))[0]')
+          PRIORITY_FIELD=$(echo "$PROJECT_DATA" | jq -r '.data.user.projectV2.fields.nodes[] | select(.name=="Priority")')
+          echo "Priority field data: $PRIORITY_FIELD"
+          
           PRIORITY_FIELD_ID=$(echo "$PRIORITY_FIELD" | jq -r '.id')
           echo "PRIORITY_FIELD_ID=$PRIORITY_FIELD_ID" >> $GITHUB_ENV
+          echo "Found Priority Field ID: $PRIORITY_FIELD_ID"
           
-          # Store priority options in a file for later use
-          echo "$PRIORITY_FIELD" | jq -r '.options' > priority_options.json
+          # Get priority options
+          PRIORITY_OPTIONS=$(echo "$PRIORITY_FIELD" | jq -r '.options')
+          echo "Priority options: $PRIORITY_OPTIONS"
+          echo "PRIORITY_OPTIONS='$PRIORITY_OPTIONS'" >> $GITHUB_ENV
           
           # Get other field IDs
-          STATUS_FIELD_ID=$(echo "$FIELDS_JSON" | jq -r '.[] | select(.name=="Status") | .id')
-          DATE_FIELD_ID=$(echo "$FIELDS_JSON" | jq -r '.[] | select(.name=="Due Date") | .id')
-          
-          echo "STATUS_FIELD_ID=$STATUS_FIELD_ID" >> $GITHUB_ENV
+          DATE_FIELD_ID=$(echo "$PROJECT_DATA" | jq -r '.data.user.projectV2.fields.nodes[] | select(.name=="Due Date") | .id')
           echo "DATE_FIELD_ID=$DATE_FIELD_ID" >> $GITHUB_ENV
-          
-          echo "Found Priority Field ID: $PRIORITY_FIELD_ID"
-          echo "Found Status Field ID: $STATUS_FIELD_ID"
           echo "Found Date Field ID: $DATE_FIELD_ID"
-          echo "Priority field data: $PRIORITY_FIELD"
       
       - name: Sync Existing Issues
         env:
@@ -116,25 +110,33 @@ jobs:
               priority_name="P3 - Normal ⭐"
             fi
             
-            # Update priority
-            echo "Setting priority to $priority_name..."
-            gh api graphql -f query='
-              mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: String!) {
-                updateProjectV2ItemFieldValue(
-                  input: {
-                    projectId: $projectId
-                    itemId: $itemId
-                    fieldId: $fieldId
-                    value: { 
-                      text: $value
+            # Get option ID for the priority
+            priority_option_id=$(echo "$PRIORITY_OPTIONS" | jq -r ".[] | select(.name==\"$priority_name\") | .id")
+            echo "Found priority option ID: $priority_option_id for $priority_name"
+            
+            if [ ! -z "$priority_option_id" ]; then
+              # Update priority
+              echo "Setting priority to $priority_name with option ID $priority_option_id..."
+              gh api graphql -f query='
+                mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                  updateProjectV2ItemFieldValue(
+                    input: {
+                      projectId: $projectId
+                      itemId: $itemId
+                      fieldId: $fieldId
+                      value: { 
+                        singleSelectOptionId: $optionId
+                      }
+                    }
+                  ) {
+                    projectV2Item {
+                      id
                     }
                   }
-                ) {
-                  projectV2Item {
-                    id
-                  }
-                }
-              }' -f projectId="$PROJECT_ID" -f itemId="$item_id" -f fieldId="$PRIORITY_FIELD_ID" -f value="$priority_name"
+                }' -f projectId="$PROJECT_ID" -f itemId="$item_id" -f fieldId="$PRIORITY_FIELD_ID" -f optionId="$priority_option_id"
+            else
+              echo "Warning: Could not find option ID for priority $priority_name"
+            fi
             
             # Set due date (March 7, 2025)
             echo "Setting due date..."
