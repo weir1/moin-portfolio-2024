@@ -1,0 +1,78 @@
+name: Auto Status Update
+
+on:
+  issues:
+    types: [opened, reopened, closed, assigned]
+  pull_request:
+    types: [opened, reopened, closed, assigned, review_requested]
+
+jobs:
+  update_status:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Update Status based on Action
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const item = context.payload.issue || context.payload.pull_request;
+            if (!item) return;
+            
+            let status = '';
+            
+            // Determine status based on action
+            if (context.payload.action === 'opened') {
+              status = 'Todo';
+            } else if (context.payload.action === 'assigned') {
+              status = 'In Progress';
+            } else if (context.payload.action === 'review_requested') {
+              status = 'Review';
+            } else if (context.payload.action === 'closed') {
+              status = 'Done';
+            } else if (context.payload.action === 'reopened') {
+              status = 'Todo';
+            }
+            
+            // Get project details
+            const projects = await github.rest.projects.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open'
+            });
+            
+            const project = projects.data.find(p => p.name === 'Moin Portfolio Website');
+            if (!project) return;
+            
+            // Update project card
+            const columns = await github.rest.projects.listColumns({
+              project_id: project.id
+            });
+            
+            // Find status column
+            const statusColumn = columns.data.find(c => c.name === status);
+            if (!statusColumn) return;
+            
+            // Move card to appropriate column
+            const cards = await github.rest.projects.listCards({
+              column_id: statusColumn.id
+            });
+            
+            const existingCard = cards.data.find(c => {
+              return c.content_url === item.url;
+            });
+            
+            if (existingCard) {
+              await github.rest.projects.moveCard({
+                card_id: existingCard.id,
+                position: 'top',
+                column_id: statusColumn.id
+              });
+            } else {
+              await github.rest.projects.createCard({
+                column_id: statusColumn.id,
+                content_id: item.id,
+                content_type: context.payload.issue ? 'Issue' : 'PullRequest'
+              });
+            }
