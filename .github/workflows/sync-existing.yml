@@ -41,6 +41,9 @@ jobs:
               }
             }')
 
+          echo "Raw Fields Data:"
+          echo "$FIELDS_DATA" | jq '.'
+
           # Extract and store project ID
           PROJECT_ID=$(echo "$FIELDS_DATA" | jq -r '.data.user.projectV2.id')
           echo "PROJECT_ID=$PROJECT_ID" >> $GITHUB_ENV
@@ -48,16 +51,17 @@ jobs:
 
           # Find Priority field and its options
           PRIORITY_DATA=$(echo "$FIELDS_DATA" | jq -r '.data.user.projectV2.fields.nodes[] | select(.name=="Priority")')
-          echo "Priority field data: $PRIORITY_DATA"
+          echo "Priority field data:"
+          echo "$PRIORITY_DATA" | jq '.'
           
           PRIORITY_FIELD_ID=$(echo "$PRIORITY_DATA" | jq -r '.id')
           echo "PRIORITY_FIELD_ID=$PRIORITY_FIELD_ID" >> $GITHUB_ENV
           echo "Found Priority Field ID: $PRIORITY_FIELD_ID"
 
-          # Store priority options
+          # Store priority options with better formatting
           echo "$PRIORITY_DATA" | jq -r '.options' > priority_options.json
+          echo "Priority options from file:"
           cat priority_options.json
-          echo "Priority options saved to priority_options.json"
 
           # Find Date field
           DATE_FIELD_ID=$(echo "$FIELDS_DATA" | jq -r '.data.user.projectV2.fields.nodes[] | select(.name=="Due Date") | .id')
@@ -97,23 +101,26 @@ jobs:
             # Get labels
             labels=$(echo "$issue" | jq -r '.labels[].name // empty')
             
-            # Set priority based on labels
-            if echo "$labels" | grep -q "p0-critical"; then
+            # Set priority based on title and labels
+            if [[ "$title" == *"[P0]"* ]] || echo "$labels" | grep -q "p0-critical"; then
               priority_name="P0 - Critical 🚨"
-            elif echo "$labels" | grep -q "high-priority"; then
+            elif [[ "$title" == *"[P1]"* ]] || echo "$labels" | grep -q "high-priority"; then
               priority_name="P1 - High Priority 🔥"
-            elif echo "$labels" | grep -q "feature"; then
+            elif [[ "$title" == *"[P2]"* ]] || echo "$labels" | grep -q "feature"; then
               priority_name="P2 - Important 📈"
             else
               priority_name="P3 - Normal ⭐"
             fi
             
+            echo "Priority options available:"
+            cat priority_options.json
+            
             # Get option ID for the priority
             option_id=$(jq -r ".[] | select(.name==\"$priority_name\") | .id" priority_options.json)
-            echo "Found option ID for $priority_name: $option_id"
+            echo "Looking for priority: $priority_name"
+            echo "Found option ID: $option_id"
             
             if [ ! -z "$option_id" ]; then
-              # Update priority
               echo "Setting priority to $priority_name with option ID $option_id..."
               gh api graphql -f query='
                 mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
@@ -134,6 +141,8 @@ jobs:
                 }' -f projectId="$PROJECT_ID" -f itemId="$item_id" -f fieldId="$PRIORITY_FIELD_ID" -f optionId="$option_id"
             else
               echo "Warning: Could not find option ID for priority $priority_name"
+              echo "Available options in priority_options.json:"
+              cat priority_options.json
             fi
             
             if [ ! -z "$DATE_FIELD_ID" ]; then
@@ -156,8 +165,6 @@ jobs:
                     }
                   }
                 }' -f projectId="$PROJECT_ID" -f itemId="$item_id" -f fieldId="$DATE_FIELD_ID"
-            else
-              echo "Warning: Date field ID not found"
             fi
             
             echo "Completed processing issue #$issue_number"
