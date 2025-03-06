@@ -14,10 +14,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         id: project
         run: |
-          # Get project info using the project number
+          # First get the project ID
+          echo "Getting project ID..."
           PROJECT_DATA=$(gh api graphql -f query='
             query {
-              viewer {
+              user(login: "weir1") {
                 projectV2(number: 3) {
                   id
                   fields(first: 20) {
@@ -44,13 +45,15 @@ jobs:
               }
             }')
           
+          echo "Project data: $PROJECT_DATA"
+          
           # Extract project ID
-          PROJECT_ID=$(echo "$PROJECT_DATA" | jq -r '.data.viewer.projectV2.id')
+          PROJECT_ID=$(echo "$PROJECT_DATA" | jq -r '.data.user.projectV2.id')
           echo "PROJECT_ID=$PROJECT_ID" >> $GITHUB_ENV
           echo "Found Project ID: $PROJECT_ID"
           
           # Extract field IDs
-          FIELDS_JSON=$(echo "$PROJECT_DATA" | jq -r '.data.viewer.projectV2.fields.nodes')
+          FIELDS_JSON=$(echo "$PROJECT_DATA" | jq -r '.data.user.projectV2.fields.nodes')
           
           # Get field IDs
           PRIORITY_FIELD_ID=$(echo "$FIELDS_JSON" | jq -r '.[] | select(.name=="Priority") | .id')
