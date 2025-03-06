@@ -1,0 +1,111 @@
+name: Sync Existing Issues
+
+on:
+  workflow_dispatch:  # This allows manual triggering
+
+jobs:
+  sync_existing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Sync Existing Issues
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Get all issues
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              per_page: 100
+            });
+            
+            // Get project details
+            const projects = await github.rest.projects.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open'
+            });
+            
+            const project = projects.data.find(p => p.name === 'Moin Portfolio Website');
+            if (!project) {
+              console.log('Project not found');
+              return;
+            }
+            
+            // Get project columns
+            const columns = await github.rest.projects.listColumns({
+              project_id: project.id
+            });
+            
+            const todoColumn = columns.data.find(c => c.name === 'Todo');
+            const inProgressColumn = columns.data.find(c => c.name === 'In Progress');
+            const reviewColumn = columns.data.find(c => c.name === 'Review');
+            const doneColumn = columns.data.find(c => c.name === 'Done');
+            
+            // Process each issue
+            for (const issue of issues) {
+              // Skip pull requests
+              if (issue.pull_request) continue;
+              
+              let targetColumn = todoColumn;
+              
+              // Determine status based on issue state and assignees
+              if (issue.state === 'closed') {
+                targetColumn = doneColumn;
+              } else if (issue.assignees && issue.assignees.length > 0) {
+                targetColumn = inProgressColumn;
+              }
+              
+              if (!targetColumn) continue;
+              
+              // Check if card already exists in any column
+              let existingCard = null;
+              for (const col of columns.data) {
+                const cards = await github.rest.projects.listCards({
+                  column_id: col.id
+                });
+                
+                existingCard = cards.data.find(c => c.content_url === issue.url);
+                if (existingCard) break;
+              }
+              
+              try {
+                if (existingCard) {
+                  // Move card to correct column
+                  await github.rest.projects.moveCard({
+                    card_id: existingCard.id,
+                    position: 'top',
+                    column_id: targetColumn.id
+                  });
+                } else {
+                  // Create new card
+                  await github.rest.projects.createCard({
+                    column_id: targetColumn.id,
+                    content_id: issue.id,
+                    content_type: 'Issue'
+                  });
+                }
+                
+                // Set priority based on labels
+                const labels = issue.labels.map(label => label.name);
+                let priority = '';
+                if (labels.includes('p0-critical')) {
+                  priority = 'P0 - Critical 🚨';
+                } else if (labels.includes('high-priority')) {
+                  priority = 'P1 - High Priority 🔥';
+                } else if (labels.includes('feature')) {
+                  priority = 'P2 - Important 📈';
+                } else {
+                  priority = 'P3 - Normal ⭐';
+                }
+                
+                console.log(`Processed issue #${issue.number}: ${issue.title}`);
+              } catch (error) {
+                console.error(`Error processing issue #${issue.number}:`, error);
+              }
+            }
+            
+            console.log('Finished syncing existing issues');
