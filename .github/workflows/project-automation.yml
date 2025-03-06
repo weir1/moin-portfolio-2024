@@ -9,116 +9,101 @@ on:
 jobs:
   project_automation:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PROJECT_ID: "3"  # Your project number
+      VIEW_ID: "3"    # Your view number
     steps:
       - uses: actions/checkout@v4
       
-      - name: Add to Project
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const item = context.payload.issue || context.payload.pull_request;
-            if (!item) return;
-            
-            // Get project details
-            const projects = await github.rest.projects.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open'
-            });
-            
-            const project = projects.data.find(p => p.name === 'Moin Portfolio Website');
-            if (!project) return;
-            
-            // Get project columns
-            const columns = await github.rest.projects.listColumns({
-              project_id: project.id
-            });
-            
-            // Default to Todo column
-            const todoColumn = columns.data.find(c => c.name === 'Todo');
-            if (!todoColumn) return;
-            
-            // Check if card already exists
-            const cards = await github.rest.projects.listCards({
-              column_id: todoColumn.id
-            });
-            
-            const existingCard = cards.data.find(c => {
-              return c.content_url === item.url;
-            });
-            
-            // Create card if it doesn't exist
-            if (!existingCard) {
-              await github.rest.projects.createCard({
-                column_id: todoColumn.id,
-                content_id: item.id,
-                content_type: context.payload.issue ? 'Issue' : 'PullRequest'
-              });
-            }
-
-  sync_labels:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Sync Labels with Project
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const item = context.payload.issue || context.payload.pull_request;
-            if (!item) return;
-            
-            const labels = item.labels.map(label => label.name);
-            
-            // Define label mappings
-            const labelMappings = {
-              'p0-critical': 'P0 - Critical 🚨',
-              'high-priority': 'P1 - High Priority 🔥',
-              'feature': 'P2 - Important 📈',
-              'frontend': 'Frontend',
-              'backend': 'Backend',
-              'design-system': 'Design System',
-              'testing': 'Testing',
-              'documentation': 'Documentation'
-            };
-            
-            // Update project card with labels
-            const projects = await github.rest.projects.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open'
-            });
-            
-            const project = projects.data.find(p => p.name === 'Moin Portfolio Website');
-            if (!project) return;
-            
-            // Get all columns
-            const columns = await github.rest.projects.listColumns({
-              project_id: project.id
-            });
-            
-            // Find card in any column
-            for (const column of columns.data) {
-              const cards = await github.rest.projects.listCards({
-                column_id: column.id
-              });
-              
-              const card = cards.data.find(c => c.content_url === item.url);
-              if (card) {
-                // Update card note with labels
-                const mappedLabels = labels
-                  .map(label => labelMappings[label])
-                  .filter(Boolean)
-                  .join(', ');
-                
-                if (mappedLabels) {
-                  await github.rest.projects.updateCard({
-                    card_id: card.id,
-                    note: `Labels: ${mappedLabels}`
-                  });
+      - name: Process Item
+        run: |
+          # Get the item details
+          if [[ "${{ github.event_name }}" == "issues" ]]; then
+            item_id="${{ github.event.issue.node_id }}"
+            labels="${{ toJson(github.event.issue.labels) }}"
+          else
+            item_id="${{ github.event.pull_request.node_id }}"
+            labels="${{ toJson(github.event.pull_request.labels) }}"
+          fi
+          
+          # Add to project
+          echo "Adding item to project..."
+          gh api graphql -f query='
+            mutation($project:ID!, $item:ID!) {
+              addProjectV2ItemById(input: {projectId: $project contentId: $item}) {
+                item {
+                  id
                 }
-                break;
               }
-            }
+            }' -f project="$PROJECT_ID" -f item="$item_id"
+          
+          # Set status based on action
+          status=""
+          case "${{ github.event.action }}" in
+            "opened")
+              status="Todo"
+              ;;
+            "assigned")
+              status="In Progress"
+              ;;
+            "review_requested")
+              status="Review"
+              ;;
+            "closed")
+              status="Done"
+              ;;
+            "reopened")
+              status="Todo"
+              ;;
+          esac
+          
+          if [ ! -z "$status" ]; then
+            echo "Setting status to: $status"
+            gh api graphql -f query='
+              mutation($project:ID!, $item:ID!, $status:String!) {
+                updateProjectV2ItemFieldValue(
+                  input: {
+                    projectId: $project
+                    itemId: $item
+                    fieldId: "Status"
+                    value: $status
+                  }
+                ) {
+                  projectV2Item {
+                    id
+                  }
+                }
+              }' -f project="$PROJECT_ID" -f item="$item_id" -f status="$status"
+          fi
+          
+          # Set priority based on labels
+          priority=""
+          if echo "$labels" | jq -e 'any(.name == "p0-critical")' > /dev/null; then
+            priority="P0 - Critical 🚨"
+          elif echo "$labels" | jq -e 'any(.name == "high-priority")' > /dev/null; then
+            priority="P1 - High Priority 🔥"
+          elif echo "$labels" | jq -e 'any(.name == "feature")' > /dev/null; then
+            priority="P2 - Important 📈"
+          else
+            priority="P3 - Normal ⭐"
+          fi
+          
+          if [ ! -z "$priority" ]; then
+            echo "Setting priority to: $priority"
+            gh api graphql -f query='
+              mutation($project:ID!, $item:ID!, $priority:String!) {
+                updateProjectV2ItemFieldValue(
+                  input: {
+                    projectId: $project
+                    itemId: $item
+                    fieldId: "Priority"
+                    value: $priority
+                  }
+                ) {
+                  projectV2Item {
+                    id
+                  }
+                }
+              }' -f project="$PROJECT_ID" -f item="$item_id" -f priority="$priority"
+          fi
