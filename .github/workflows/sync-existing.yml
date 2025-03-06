@@ -10,102 +10,65 @@ jobs:
       - uses: actions/checkout@v4
       
       - name: Sync Existing Issues
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            // Get all issues
-            const issues = await github.paginate(github.rest.issues.listForRepo, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'all',
-              per_page: 100
-            });
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROJECT_ID: "3"  # Your project number
+          VIEW_ID: "3"    # Your view number
+        run: |
+          # Get all issues
+          issues=$(gh api -X GET /repos/${{ github.repository }}/issues \
+            -F state=all \
+            -F per_page=100)
+          
+          # For each issue
+          echo "$issues" | jq -c '.[]' | while read -r issue; do
+            issue_number=$(echo "$issue" | jq -r '.number')
+            title=$(echo "$issue" | jq -r '.title')
+            labels=$(echo "$issue" | jq -r '.labels[].name')
             
-            // Get project details
-            const projects = await github.rest.projects.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open'
-            });
+            # Add to project if not already added
+            echo "Processing issue #$issue_number: $title"
             
-            const project = projects.data.find(p => p.name === 'Moin Portfolio Website');
-            if (!project) {
-              console.log('Project not found');
-              return;
-            }
-            
-            // Get project columns
-            const columns = await github.rest.projects.listColumns({
-              project_id: project.id
-            });
-            
-            const todoColumn = columns.data.find(c => c.name === 'Todo');
-            const inProgressColumn = columns.data.find(c => c.name === 'In Progress');
-            const reviewColumn = columns.data.find(c => c.name === 'Review');
-            const doneColumn = columns.data.find(c => c.name === 'Done');
-            
-            // Process each issue
-            for (const issue of issues) {
-              // Skip pull requests
-              if (issue.pull_request) continue;
-              
-              let targetColumn = todoColumn;
-              
-              // Determine status based on issue state and assignees
-              if (issue.state === 'closed') {
-                targetColumn = doneColumn;
-              } else if (issue.assignees && issue.assignees.length > 0) {
-                targetColumn = inProgressColumn;
-              }
-              
-              if (!targetColumn) continue;
-              
-              // Check if card already exists in any column
-              let existingCard = null;
-              for (const col of columns.data) {
-                const cards = await github.rest.projects.listCards({
-                  column_id: col.id
-                });
-                
-                existingCard = cards.data.find(c => c.content_url === issue.url);
-                if (existingCard) break;
-              }
-              
-              try {
-                if (existingCard) {
-                  // Move card to correct column
-                  await github.rest.projects.moveCard({
-                    card_id: existingCard.id,
-                    position: 'top',
-                    column_id: targetColumn.id
-                  });
-                } else {
-                  // Create new card
-                  await github.rest.projects.createCard({
-                    column_id: targetColumn.id,
-                    content_id: issue.id,
-                    content_type: 'Issue'
-                  });
+            # Add to project using GraphQL
+            gh api graphql -f query='
+              mutation($project:ID!, $issue:ID!) {
+                addProjectV2ItemById(input: {projectId: $project contentId: $issue}) {
+                  item {
+                    id
+                  }
                 }
-                
-                // Set priority based on labels
-                const labels = issue.labels.map(label => label.name);
-                let priority = '';
-                if (labels.includes('p0-critical')) {
-                  priority = 'P0 - Critical 🚨';
-                } else if (labels.includes('high-priority')) {
-                  priority = 'P1 - High Priority 🔥';
-                } else if (labels.includes('feature')) {
-                  priority = 'P2 - Important 📈';
-                } else {
-                  priority = 'P3 - Normal ⭐';
-                }
-                
-                console.log(`Processed issue #${issue.number}: ${issue.title}`);
-              } catch (error) {
-                console.error(`Error processing issue #${issue.number}:`, error);
-              }
-            }
+              }' -f project="$PROJECT_ID" -f issue="$issue" || true
             
-            console.log('Finished syncing existing issues');
+            # Set priority based on labels
+            priority=""
+            if echo "$labels" | grep -q "p0-critical"; then
+              priority="P0 - Critical 🚨"
+            elif echo "$labels" | grep -q "high-priority"; then
+              priority="P1 - High Priority 🔥"
+            elif echo "$labels" | grep -q "feature"; then
+              priority="P2 - Important 📈"
+            else
+              priority="P3 - Normal ⭐"
+            fi
+            
+            # Update priority field using GraphQL
+            if [ ! -z "$priority" ]; then
+              gh api graphql -f query='
+                mutation($project:ID!, $item:ID!, $value:String!) {
+                  updateProjectV2ItemFieldValue(
+                    input: {
+                      projectId: $project
+                      itemId: $item
+                      fieldId: "Priority"
+                      value: $value
+                    }
+                  ) {
+                    projectV2Item {
+                      id
+                    }
+                  }
+                }' -f project="$PROJECT_ID" -f item="$issue" -f value="$priority" || true
+            fi
+            
+            echo "Processed issue #$issue_number"
+          done
