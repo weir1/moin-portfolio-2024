@@ -23,7 +23,7 @@ jobs:
                   id
                   fields(first: 20) {
                     nodes {
-                      ... on ProjectV2Field {
+                      ... on ProjectV2FieldCommon {
                         id
                         name
                       }
@@ -35,9 +35,10 @@ jobs:
                           name
                         }
                       }
-                      ... on ProjectV2DateField {
+                      ... on ProjectV2Field {
                         id
                         name
+                        dataType
                       }
                     }
                   }
@@ -103,19 +104,19 @@ jobs:
             
             # Set priority based on labels
             if echo "$labels" | grep -q "p0-critical"; then
-              priority="P0 - Critical 🚨"
+              priority_value="{\"optionId\":\"P0 - Critical 🚨\"}"
             elif echo "$labels" | grep -q "high-priority"; then
-              priority="P1 - High Priority 🔥"
+              priority_value="{\"optionId\":\"P1 - High Priority 🔥\"}"
             elif echo "$labels" | grep -q "feature"; then
-              priority="P2 - Important 📈"
+              priority_value="{\"optionId\":\"P2 - Important 📈\"}"
             else
-              priority="P3 - Normal ⭐"
+              priority_value="{\"optionId\":\"P3 - Normal ⭐\"}"
             fi
             
             # Update priority
-            echo "Setting priority to: $priority"
+            echo "Setting priority..."
             gh api graphql -f query='
-              mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: String!) {
+              mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
                 updateProjectV2ItemFieldValue(
                   input: {
                     projectId: $projectId
@@ -128,25 +129,25 @@ jobs:
                     id
                   }
                 }
-              }' -f projectId="$PROJECT_ID" -f itemId="$item_id" -f fieldId="$PRIORITY_FIELD_ID" -f value="$priority"
+              }' -f projectId="$PROJECT_ID" -f itemId="$item_id" -f fieldId="$PRIORITY_FIELD_ID" -f value="$priority_value"
             
             # Set due date (March 7, 2025)
-            echo "Setting due date to 2025-03-07"
+            echo "Setting due date..."
             gh api graphql -f query='
-              mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: Date!) {
+              mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!) {
                 updateProjectV2ItemFieldValue(
                   input: {
                     projectId: $projectId
                     itemId: $itemId
                     fieldId: $fieldId
-                    value: $value
+                    value: { date: "2025-03-07" }
                   }
                 ) {
                   projectV2Item {
                     id
                   }
                 }
-              }' -f projectId="$PROJECT_ID" -f itemId="$item_id" -f fieldId="$DATE_FIELD_ID" -f value="2025-03-07"
+              }' -f projectId="$PROJECT_ID" -f itemId="$item_id" -f fieldId="$DATE_FIELD_ID"
             
             echo "Completed processing issue #$issue_number"
           done
