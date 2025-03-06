@@ -14,7 +14,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         id: project
         run: |
-          # First get the project ID
+          # First get the project ID and field information
           echo "Getting project ID..."
           PROJECT_DATA=$(gh api graphql -f query='
             query {
@@ -53,21 +53,29 @@ jobs:
           echo "PROJECT_ID=$PROJECT_ID" >> $GITHUB_ENV
           echo "Found Project ID: $PROJECT_ID"
           
-          # Extract field IDs
+          # Extract field IDs and options
           FIELDS_JSON=$(echo "$PROJECT_DATA" | jq -r '.data.user.projectV2.fields.nodes')
           
-          # Get field IDs
-          PRIORITY_FIELD_ID=$(echo "$FIELDS_JSON" | jq -r '.[] | select(.name=="Priority") | .id')
+          # Get Priority field info including options
+          PRIORITY_FIELD=$(echo "$FIELDS_JSON" | jq -r '. | map(select(.name=="Priority"))[0]')
+          PRIORITY_FIELD_ID=$(echo "$PRIORITY_FIELD" | jq -r '.id')
+          echo "PRIORITY_FIELD_ID=$PRIORITY_FIELD_ID" >> $GITHUB_ENV
+          
+          # Get other field IDs
           STATUS_FIELD_ID=$(echo "$FIELDS_JSON" | jq -r '.[] | select(.name=="Status") | .id')
           DATE_FIELD_ID=$(echo "$FIELDS_JSON" | jq -r '.[] | select(.name=="Due Date") | .id')
           
-          echo "PRIORITY_FIELD_ID=$PRIORITY_FIELD_ID" >> $GITHUB_ENV
           echo "STATUS_FIELD_ID=$STATUS_FIELD_ID" >> $GITHUB_ENV
           echo "DATE_FIELD_ID=$DATE_FIELD_ID" >> $GITHUB_ENV
+          
+          # Get priority options and their IDs
+          PRIORITY_OPTIONS=$(echo "$PRIORITY_FIELD" | jq -r '.options')
+          echo "PRIORITY_OPTIONS=$PRIORITY_OPTIONS" >> $GITHUB_ENV
           
           echo "Found Priority Field ID: $PRIORITY_FIELD_ID"
           echo "Found Status Field ID: $STATUS_FIELD_ID"
           echo "Found Date Field ID: $DATE_FIELD_ID"
+          echo "Priority Options: $PRIORITY_OPTIONS"
       
       - name: Sync Existing Issues
         env:
@@ -104,32 +112,37 @@ jobs:
             
             # Set priority based on labels
             if echo "$labels" | grep -q "p0-critical"; then
-              priority_value="{\"optionId\":\"P0 - Critical 🚨\"}"
+              priority_name="P0 - Critical 🚨"
             elif echo "$labels" | grep -q "high-priority"; then
-              priority_value="{\"optionId\":\"P1 - High Priority 🔥\"}"
+              priority_name="P1 - High Priority 🔥"
             elif echo "$labels" | grep -q "feature"; then
-              priority_value="{\"optionId\":\"P2 - Important 📈\"}"
+              priority_name="P2 - Important 📈"
             else
-              priority_value="{\"optionId\":\"P3 - Normal ⭐\"}"
+              priority_name="P3 - Normal ⭐"
             fi
             
+            # Get option ID for the priority
+            priority_option_id=$(echo "$PRIORITY_OPTIONS" | jq -r ".[] | select(.name==\"$priority_name\") | .id")
+            
             # Update priority
-            echo "Setting priority..."
+            echo "Setting priority to $priority_name (ID: $priority_option_id)..."
             gh api graphql -f query='
-              mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
+              mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
                 updateProjectV2ItemFieldValue(
                   input: {
                     projectId: $projectId
                     itemId: $itemId
                     fieldId: $fieldId
-                    value: $value
+                    value: { 
+                      singleSelectOptionId: $optionId
+                    }
                   }
                 ) {
                   projectV2Item {
                     id
                   }
                 }
-              }' -f projectId="$PROJECT_ID" -f itemId="$item_id" -f fieldId="$PRIORITY_FIELD_ID" -f value="$priority_value"
+              }' -f projectId="$PROJECT_ID" -f itemId="$item_id" -f fieldId="$PRIORITY_FIELD_ID" -f optionId="$priority_option_id"
             
             # Set due date (March 7, 2025)
             echo "Setting due date..."
@@ -140,7 +153,9 @@ jobs:
                     projectId: $projectId
                     itemId: $itemId
                     fieldId: $fieldId
-                    value: { date: "2025-03-07" }
+                    value: { 
+                      date: "2025-03-07"
+                    }
                   }
                 ) {
                   projectV2Item {
