@@ -65,12 +65,16 @@ yarn dev
 
 ```
 moin-portfolio-2024/
-├── app/                  # Next.js app directory
+├── app/                 # Next.js app directory
 ├── components/          # React components
+│   ├── ui/              # UI components
+│   └── sections/        # Page sections
 ├── lib/                 # Utility functions
-├── public/             # Static assets
-├── styles/            # Global styles
-└── types/             # TypeScript types
+│   ├── animations/      # Animation utilities
+│   └── utils/           # Helper functions
+├── public/              # Static assets
+├── styles/              # Global styles
+└── types/               # TypeScript types
 ```
 
 ## 🛠️ Development
@@ -104,6 +108,43 @@ moin-portfolio-2024/
 - Consistent typography
 - Reusable components
 - Smooth animations
+
+## 🌟 Animation Library
+
+The project includes a custom animation library built with GSAP:
+
+### Features
+
+- Scroll-triggered animations
+- Mouse follow effects
+- Text reveal animations
+- Parallax effects
+- Staggered animations
+
+### Usage
+
+```tsx
+import { useScrollAnimation, AnimatedSection } from '@/lib/animations';
+
+// Using hooks
+const MyComponent = () => {
+  const ref = useRef(null);
+  useScrollAnimation(ref, { type: 'fadeInUp' });
+  
+  return <div ref={ref}>Animated content</div>;
+};
+
+// Using components
+const MyPage = () => {
+  return (
+    <AnimatedSection animation="fadeInUp" delay={0.2}>
+      <h2>This section animates on scroll</h2>
+    </AnimatedSection>
+  );
+};
+```
+
+For more details, see the [Animation Library Documentation](./src/lib/animations/README.md).
 
 ## 🔍 SEO
 

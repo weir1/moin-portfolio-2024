@@ -35,6 +35,10 @@ export const effects = {
     WebkitBackgroundClip: 'text',
     WebkitTextFillColor: 'transparent',
     backgroundClip: 'text',
+    color: themeColors.primary.main,
+    position: 'relative',
+    display: 'inline-block',
+    textShadow: '0 0 1px rgba(255,255,255,0.05)',
   },
 
   sectionBackground: (theme: Theme) => ({

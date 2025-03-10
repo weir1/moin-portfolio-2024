@@ -5,8 +5,13 @@ import { Box, Container, Grid, Typography } from '@mui/material';
 import gsap from 'gsap';
 import ScrollTrigger from 'gsap/ScrollTrigger';
 import { effects } from '@/lib/theme';
+import AnimatedSection from '../ui/AnimatedSection';
+import { useMouseFollow } from '@/lib/animations';
 
-gsap.registerPlugin(ScrollTrigger);
+// Ensure ScrollTrigger is registered
+if (typeof window !== 'undefined') {
+  gsap.registerPlugin(ScrollTrigger);
+}
 
 const metrics = [
   {
@@ -28,8 +33,15 @@ const metrics = [
 ];
 
 export default function MetricsSection() {
+  const sectionRef = useRef<HTMLDivElement>(null);
   const metricsRef = useRef<HTMLDivElement>(null);
   const numbersRef = useRef<(HTMLSpanElement | null)[]>([]);
+  
+  // Apply mouse follow effect
+  useMouseFollow(sectionRef, {
+    intensity: 0.2,
+    size: 600
+  });
 
   useEffect(() => {
     const ctx = gsap.context(() => {
@@ -51,17 +63,6 @@ export default function MetricsSection() {
           once: true,
         });
       });
-
-      // Fade in animation for the entire section
-      gsap.from(metricsRef.current, {
-        opacity: 0,
-        y: 50,
-        duration: 1,
-        scrollTrigger: {
-          trigger: metricsRef.current,
-          start: 'top center+=100',
-        },
-      });
     }, metricsRef);
 
     return () => ctx.revert();
@@ -71,51 +72,62 @@ export default function MetricsSection() {
     <Box 
       component="section" 
       py={8} 
-      ref={metricsRef}
-      sx={effects.sectionBackground}
+      ref={sectionRef}
+      sx={{
+        ...effects.sectionBackground,
+        position: 'relative',
+        overflow: 'hidden'
+      }}
     >
       <Container>
-        <Typography 
-          variant="h2" 
-          textAlign="center" 
-          mb={6}
-          sx={effects.gradientText}
-        >
-          Our Impact
-        </Typography>
-        <Grid container spacing={4} justifyContent="center">
-          {metrics.map((metric, index) => (
-            <Grid item xs={12} md={4} key={metric.label}>
-              <Box
-                sx={{
-                  ...effects.glassEffect(),
-                  ...effects.hoverTransition,
-                  p: 4,
-                  textAlign: 'center',
-                  height: '100%',
-                  borderRadius: 2,
-                }}
-              >
-                <Typography variant="h3" gutterBottom>
-                  {metric.prefix}
+        <AnimatedSection animation="fadeIn">
+          <Typography 
+            variant="h2" 
+            textAlign="center" 
+            mb={6}
+            className="gradient-text"
+          >
+            Our Impact
+          </Typography>
+        </AnimatedSection>
+        
+        <div ref={metricsRef}>
+          <Grid container spacing={4} justifyContent="center">
+            {metrics.map((metric, index) => (
+              <Grid item xs={12} md={4} key={metric.label}>
+                <AnimatedSection animation="fadeInUp" delay={0.2 * (index + 1)}>
                   <Box
-                    component="span"
-                    ref={(el: HTMLSpanElement | null) => {
-                      numbersRef.current[index] = el;
+                    sx={{
+                      ...effects.glassEffect(),
+                      ...effects.hoverTransition,
+                      p: 4,
+                      textAlign: 'center',
+                      height: '100%',
+                      borderRadius: 2,
                     }}
-                    sx={{ color: 'primary.main' }}
                   >
-                    0
+                    <Typography variant="h3" gutterBottom>
+                      {metric.prefix}
+                      <Box
+                        component="span"
+                        ref={(el: HTMLSpanElement | null) => {
+                          numbersRef.current[index] = el;
+                        }}
+                        sx={{ color: 'primary.main' }}
+                      >
+                        0
+                      </Box>
+                      {metric.suffix}
+                    </Typography>
+                    <Typography variant="h6" color="text.secondary">
+                      {metric.label}
+                    </Typography>
                   </Box>
-                  {metric.suffix}
-                </Typography>
-                <Typography variant="h6" color="text.secondary">
-                  {metric.label}
-                </Typography>
-              </Box>
-            </Grid>
-          ))}
-        </Grid>
+                </AnimatedSection>
+              </Grid>
+            ))}
+          </Grid>
+        </div>
       </Container>
     </Box>
   );
